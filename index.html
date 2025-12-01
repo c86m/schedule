@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>培培的班表</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icon.png">
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 和 Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* --- 高幀率優化 CSS --- */
+        .hardware-accelerated {
+            transform: translate3d(0, 0, 0);
+            backface-visibility: hidden;
+            perspective: 1000px;
+            will-change: transform, opacity;
+        }
+
+        @keyframes blob {
+            0% { transform: translate3d(0px, 0px, 0px) scale(1); }
+            33% { transform: translate3d(30px, -50px, 0px) scale(1.1); }
+            66% { transform: translate3d(-20px, 20px, 0px) scale(0.9); }
+            100% { transform: translate3d(0px, 0px, 0px) scale(1); }
+        }
+        
+        @keyframes slide-up {
+            from { transform: translate3d(0, 100%, 0); opacity: 0; }
+            to { transform: translate3d(0, 0, 0); opacity: 1; }
+        }
+
+        @keyframes fade-in {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .animate-blob {
+            animation: blob 10s infinite cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform;
+            transform: translate3d(0,0,0);
+        }
+        
+        .animation-delay-2000 { animation-delay: 2s; }
+        .animation-delay-4000 { animation-delay: 4s; }
+        
+        .animate-slide-up {
+            animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            will-change: transform, opacity;
+        }
+
+        .animate-fade-in {
+            animation: fade-in 0.3s ease-out forwards;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            background-color: #f0f9ff;
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        // --- Firebase Imports ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, addDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 將 Firebase SDK 函式掛載到 window
+        window.Firebase = { 
+            initializeApp, 
+            getAuth, 
+            signInWithEmailAndPassword, 
+            createUserWithEmailAndPassword, 
+            signOut,
+            onAuthStateChanged, 
+            getFirestore, 
+            collection, 
+            doc, 
+            setDoc, 
+            deleteDoc, 
+            onSnapshot, 
+            query, 
+            orderBy, 
+            addDoc, 
+            writeBatch 
+        };
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        const APP_ID = "glass-shift-prod"; 
+
+        // --- Icon Components ---
+        const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {path}
+            </svg>
+        );
+
+        const Icons = {
+            Calendar: (props) => <Icon {...props} path={<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></>} />,
+            Trash2: (props) => <Icon {...props} path={<><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></>} />,
+            Plus: (props) => <Icon {...props} path={<><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></>} />,
+            Sparkles: (props) => <Icon {...props} path={<><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></>} />,
+            ChevronLeft: (props) => <Icon {...props} path={<><polyline points="15 18 9 12 15 6"></polyline></>} />,
+            ChevronRight: (props) => <Icon {...props} path={<><polyline points="9 18 15 12 9 6"></polyline></>} />,
+            X: (props) => <Icon {...props} path={<><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></>} />,
+            Save: (props) => <Icon {...props} path={<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></>} />,
+            CheckCircle2: (props) => <Icon {...props} path={<><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></>} />,
+            Edit3: (props) => <Icon {...props} path={<><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></>} />,
+            Share2: (props) => <Icon {...props} path={<><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></>} />,
+            Clock: (props) => <Icon {...props} path={<><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></>} />,
+            Cloud: (props) => <Icon {...props} path={<><path d="M17.5 19c0-1.7-1.3-3-3-3h-11c-1.7 0-3 1.3-3 3s1.3 3 3 3h11c1.7 0 3-1.3 3-3z"></path><path d="M17.5 16c2.5 0 4.5-2 4.5-4.5S19.5 7 17 7c-.5 0-1 .1-1.5 .2C14.9 3.8 11.7 2 8.5 4 6.2 5.4 5 8.1 5.5 10.8"></path></>} />,
+            WifiOff: (props) => <Icon {...props} path={<><line x1="1" y1="1" x2="23" y2="23"></line><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path><path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></>} />,
+            Repeat: (props) => <Icon {...props} path={<><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></>} />,
+            LogOut: (props) => <Icon {...props} path={<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></>} />,
+            User: (props) => <Icon {...props} path={<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></>} />,
+            LogIn: (props) => <Icon {...props} path={<><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></>} />
+        };
+
+        // --- SmartTimeInput Component ---
+        const SmartTimeInput = ({ value, onChange, label, inputRef, onEnter }) => {
+            const handleFocus = (e) => {
+                e.target.select();
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter') {
+                    handleBlur(e);
+                    if (onEnter) {
+                        e.preventDefault();
+                        onEnter();
+                    }
+                }
+            };
+
+            const handleInputChange = (e) => {
+                let val = e.target.value;
+                const digits = val.replace(/[^\d]/g, '');
+                const truncated = digits.slice(0, 4);
+                let formatted = truncated;
+                if (truncated.length > 2) {
+                    formatted = truncated.slice(0, 2) + ':' + truncated.slice(2);
+                }
+                onChange(formatted);
+            };
+
+            const formatTimeStr = (val) => {
+                val = val.trim().replace(/[^\d:]/g, '');
+                if (!val) return "";
+
+                if (!val.includes(':')) {
+                    if (val.length === 4) {
+                        val = val.slice(0, 2) + ':' + val.slice(2);
+                    } else if (val.length === 3) {
+                        val = '0' + val.slice(0, 1) + ':' + val.slice(1);
+                    } else if (val.length <= 2) {
+                        val = val.padStart(2, '0') + ':00';
+                    }
+                } else {
+                    const parts = val.split(':');
+                    if(parts[0].length === 1) parts[0] = '0' + parts[0];
+                    if(parts[1].length === 1) parts[1] = '0' + parts[1];
+                    if(parts[1].length === 0) parts[1] = '00';
+                    val = parts.join(':');
+                }
+                return val;
+            };
+
+            const handleBlur = (e) => {
+                const val = formatTimeStr(e.target.value);
+                const [h, m] = val.split(':').map(Number);
+                if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+                    onChange(val);
+                }
+            };
+
+            return (
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">{label}</label>
+                    <div className="flex items-center gap-2"> 
+                        <input 
+                            ref={inputRef}
+                            type="text" 
+                            inputMode="numeric"
+                            value={value}
+                            onChange={handleInputChange}
+                            onBlur={handleBlur}
+                            onFocus={handleFocus}
+                            onKeyDown={handleKeyDown}
+                            placeholder="如 1800"
+                            className="flex-1 bg-white/50 border border-white/40 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-300/50 transition-all font-medium min-w-0" 
+                        />
+                        <div className="relative shrink-0 w-11 h-11 flex items-center justify-center text-slate-400 bg-white/40 border border-white/40 hover:bg-white/60 hover:text-blue-500 rounded-xl transition-all cursor-pointer shadow-sm">
+                            <Icons.Clock size={20} />
+                            <input 
+                                type="time" 
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                value={value.includes(':') ? value : ''}
+                                onChange={(e) => onChange(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Login Component ---
+        const LoginScreen = ({ onSkipLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [isRegistering, setIsRegistering] = useState(false);
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+                setLoading(true);
+                const { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } = window.Firebase;
+                const auth = getAuth();
+
+                try {
+                    if (isRegistering) {
+                        await createUserWithEmailAndPassword(auth, email, password);
+                    } else {
+                        await signInWithEmailAndPassword(auth, email, password);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+                        setError('帳號或密碼錯誤');
+                    } else if (err.code === 'auth/email-already-in-use') {
+                        setError('此 Email 已經註冊過了');
+                    } else if (err.code === 'auth/weak-password') {
+                        setError('密碼長度至少需要 6 個字');
+                    } else if (err.code === 'auth/operation-not-allowed') {
+                        setError('請先到 Firebase 後台開啟 Email/Password 登入功能！');
+                    } else {
+                        setError(err.message);
+                    }
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 animate-fade-in">
+                    <div className="w-full max-w-sm bg-white/60 backdrop-blur-xl border border-white/50 rounded-3xl p-8 shadow-xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-400 rounded-bl-full opacity-10 pointer-events-none"></div>
+                        <div className="mb-8 text-center">
+                            <div className="w-16 h-16 bg-blue-500 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-500/30">
+                                <Icons.User size={32} />
+                            </div>
+                            <h2 className="text-2xl font-bold text-slate-800">{isRegistering ? '註冊帳號' : '登入同步'}</h2>
+                            <p className="text-sm text-slate-500 mt-2">
+                                {isRegistering ? '建立帳號以在不同裝置間同步班表' : '輸入帳號密碼以同步您的班表'}
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Email</label>
+                                <input 
+                                    type="email" 
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    className="w-full bg-white/50 border border-white/40 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-300/50 transition-all"
+                                    placeholder="name@example.com"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">密碼</label>
+                                <input 
+                                    type="password" 
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                    className="w-full bg-white/50 border border-white/40 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-300/50 transition-all"
+                                    placeholder="至少 6 個字元"
+                                    required
+                                />
+                            </div>
+
+                            {error && (
+                                <div className="text-red-500 text-xs bg-red-50 p-2 rounded-lg text-center font-bold">
+                                    {error}
+                                </div>
+                            )}
+
+                            <button 
+                                type="submit" 
+                                disabled={loading}
+                                className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold py-3.5 rounded-2xl shadow-xl shadow-blue-500/25 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                            >
+                                {loading ? '處理中...' : (isRegistering ? '註冊並登入' : '登入')}
+                            </button>
+                        </form>
+
+                        <div className="mt-4 text-center space-y-3">
+                            <button 
+                                onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
+                                className="text-sm text-slate-500 hover:text-blue-600 font-medium transition-colors"
+                            >
+                                {isRegistering ? '已有帳號？點此登入' : '還沒有帳號？點此註冊'}
+                            </button>
+
+                            <div className="relative flex py-2 items-center">
+                                <div className="flex-grow border-t border-slate-300"></div>
+                                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs">或者</span>
+                                <div className="flex-grow border-t border-slate-300"></div>
+                            </div>
+
+                            <button
+                                onClick={onSkipLogin}
+                                className="text-sm font-bold text-slate-500 hover:text-slate-700 transition-colors flex items-center justify-center gap-1 w-full p-2 hover:bg-slate-50 rounded-lg"
+                            >
+                                <Icons.WifiOff size={16} /> 暫不登入，使用本機模式
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [shifts, setShifts] = useState([]);
+            const [baseRate, setBaseRate] = useState(183);
+            const [specialRate, setSpecialRate] = useState(250);
+            const [user, setUser] = useState(null);
+            const [authInitialized, setAuthInitialized] = useState(false);
+            const [isCloudMode, setIsCloudMode] = useState(false);
+            const [isOfflineMode, setIsOfflineMode] = useState(false); 
+
+            // Inputs
+            const [name, setName] = useState('');
+            const [shiftDate, setShiftDate] = useState(''); 
+            const [startTimeStr, setStartTimeStr] = useState(''); 
+            const [endTimeStr, setEndTimeStr] = useState(''); 
+            const [isSpecial, setIsSpecial] = useState(false);
+            const [showInput, setShowInput] = useState(false);
+            const [editId, setEditId] = useState(null);
+            
+            // Repeat State
+            const [isRepeat, setIsRepeat] = useState(false);
+            const [repeatEndDate, setRepeatEndDate] = useState('');
+
+            const startTimeRef = useRef(null);
+            const endTimeRef = useRef(null);
+
+            const [currentDate, setCurrentDate] = useState(new Date());
+            const [selectedDate, setSelectedDate] = useState(null);
+            const [saveStatus, setSaveStatus] = useState('idle');
+
+            // --- Firebase Init ---
+            useEffect(() => {
+                const initData = async () => {
+                    if (typeof window.Firebase !== 'undefined') {
+                        try {
+                            const { initializeApp, getAuth, onAuthStateChanged, getFirestore } = window.Firebase;
+                            
+                            const config = {
+                                apiKey: "AIzaSyB1qrSjTOMHou6JR07v9atORLG_aQPrFSU",
+                                authDomain: "glass-shift.firebaseapp.com",
+                                projectId: "glass-shift",
+                                storageBucket: "glass-shift.firebasestorage.app",
+                                messagingSenderId: "1004961141606",
+                                appId: "1:1004961141606:web:e0ee0ac3a47dae4272eea7"
+                            };
+
+                            const app = initializeApp(config);
+                            const auth = getAuth(app);
+                            const db = getFirestore(app);
+                            window.db = db;
+
+                            onAuthStateChanged(auth, (u) => {
+                                setUser(u);
+                                setAuthInitialized(true);
+                                if (u) {
+                                    setIsCloudMode(true);
+                                    setIsOfflineMode(false); 
+                                } else {
+                                    setIsCloudMode(false);
+                                }
+                            });
+                        } catch (e) {
+                            console.error("Firebase 初始化失敗:", e);
+                            setAuthInitialized(true);
+                            setIsCloudMode(false);
+                        }
+                    } else {
+                        setAuthInitialized(true);
+                        setIsCloudMode(false);
+                    }
+                };
+                initData();
+            }, []);
+
+            // 讀取本機資料
+            const loadFromLocal = () => {
+                const savedShifts = localStorage.getItem('glassShifts_v3');
+                if (savedShifts) setShifts(JSON.parse(savedShifts));
+                const savedBase = localStorage.getItem('glassBaseRate');
+                if (savedBase) setBaseRate(savedBase);
+                const savedSpecial = localStorage.getItem('glassSpecialRate');
+                if (savedSpecial) setSpecialRate(savedSpecial);
+            };
+
+            // 當切換到離線模式時，讀取本機資料
+            useEffect(() => {
+                if (isOfflineMode) {
+                    loadFromLocal();
+                }
+            }, [isOfflineMode]);
+
+            // 監聽資料變更 (雲端 - 同步班表 + 同步設定)
+            useEffect(() => {
+                if (!user || isOfflineMode) return; 
+                
+                const { onSnapshot, collection, query, doc } = window.Firebase;
+                
+                // 1. 同步班表
+                const q = query(collection(window.db, 'artifacts', APP_ID, 'users', user.uid, 'shifts')); 
+                setSaveStatus('syncing');
+                const unsubscribeShifts = onSnapshot(q, (snapshot) => {
+                    const loadedShifts = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setShifts(loadedShifts);
+                    setSaveStatus('saved');
+                }, (error) => {
+                    console.error("資料同步錯誤:", error);
+                    setSaveStatus('error');
+                });
+
+                // 2. 同步時薪設定
+                const settingsRef = doc(window.db, 'artifacts', APP_ID, 'users', user.uid, 'settings', 'rates');
+                const unsubscribeSettings = onSnapshot(settingsRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        if (data.baseRate) setBaseRate(data.baseRate);
+                        if (data.specialRate) setSpecialRate(data.specialRate);
+                    }
+                });
+
+                return () => {
+                    unsubscribeShifts();
+                    unsubscribeSettings();
+                };
+            }, [user, isOfflineMode]);
+
+            // 監聽資料變更 (本機儲存)
+            useEffect(() => {
+                if (isCloudMode && !isOfflineMode) return;
+                try {
+                    setSaveStatus('saving');
+                    localStorage.setItem('glassShifts_v3', JSON.stringify(shifts));
+                    localStorage.setItem('glassBaseRate', baseRate);
+                    localStorage.setItem('glassSpecialRate', specialRate);
+                    setTimeout(() => setSaveStatus('saved'), 500);
+                } catch (e) { console.error(e); }
+            }, [shifts, baseRate, specialRate, isCloudMode, isOfflineMode]);
+
+            // 登出功能
+            const handleLogout = async () => {
+                if (window.confirm('確定要登出嗎？登出後將無法看到雲端班表。')) {
+                    const { getAuth, signOut } = window.Firebase;
+                    const auth = getAuth();
+                    await signOut(auth);
+                    setShifts([]); 
+                }
+            };
+
+            // 轉到登入畫面 (取消離線模式)
+            const handleGoToLogin = () => {
+                setIsOfflineMode(false);
+                setShifts([]); // 清空當前顯示的本機資料，準備顯示登入畫面
+            };
+
+            // --- Batch Save Logic ---
+            const batchSaveToCloud = async (shiftsToAdd) => {
+                if (!user) return;
+                const { writeBatch, doc, collection, addDoc } = window.Firebase;
+                setSaveStatus('saving');
+                try {
+                    if (shiftsToAdd.length === 1) {
+                        const { id, ...data } = shiftsToAdd[0];
+                        await addDoc(collection(window.db, 'artifacts', APP_ID, 'users', user.uid, 'shifts'), data);
+                    } else {
+                        const batch = writeBatch(window.db);
+                        shiftsToAdd.forEach(shift => {
+                            const { id, ...data } = shift;
+                            const newDocRef = doc(collection(window.db, 'artifacts', APP_ID, 'users', user.uid, 'shifts'));
+                            batch.set(newDocRef, data);
+                        });
+                        await batch.commit();
+                    }
+                    setSaveStatus('saved');
+                } catch (e) {
+                    console.error("Batch save error", e);
+                    setSaveStatus('error');
+                    alert("儲存失敗: " + e.message);
+                }
+            };
+
+            const saveDataToCloud = async (newShift, deleteId = null) => {
+                if (!user) return;
+                const { setDoc, deleteDoc, doc, addDoc, collection } = window.Firebase;
+                setSaveStatus('saving');
+                try {
+                    if (deleteId) {
+                        await deleteDoc(doc(window.db, 'artifacts', APP_ID, 'users', user.uid, 'shifts', deleteId));
+                    } else if (newShift) {
+                        if (newShift.id && typeof newShift.id === 'string' && newShift.id.length > 15) {
+                             await setDoc(doc(window.db, 'artifacts', APP_ID, 'users', user.uid, 'shifts', newShift.id), newShift);
+                        } else {
+                             const { id, ...shiftData } = newShift;
+                             await addDoc(collection(window.db, 'artifacts', APP_ID, 'users', user.uid, 'shifts'), shiftData);
+                        }
+                    }
+                    setSaveStatus('saved');
+                } catch (e) {
+                    console.error(e);
+                    setSaveStatus('error');
+                    alert("儲存失敗: " + e.message);
+                }
+            };
+
+            const getColorByName = (nameStr) => {
+                const colorGradients = [
+                    'from-blue-400 to-cyan-400', 'from-emerald-400 to-teal-400',
+                    'from-orange-400 to-amber-400', 'from-purple-400 to-violet-400',
+                    'from-pink-400 to-rose-400', 'from-indigo-400 to-blue-500',
+                    'from-red-400 to-orange-500', 'from-lime-500 to-green-500',
+                    'from-fuchsia-400 to-pink-400', 'from-sky-400 to-blue-400'
+                ];
+                if (!nameStr) return colorGradients[0];
+                let hash = 0;
+                for (let i = 0; i < nameStr.length; i++) {
+                    hash = nameStr.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                const index = Math.abs(hash) % colorGradients.length;
+                return colorGradients[index];
+            };
+
+            const exportToCalendar = () => {
+                if (shifts.length === 0) {
+                    alert("目前沒有班表可匯出");
+                    return;
+                }
+                const formatICSDate = (dateStr) => dateStr.replace(/[-:]/g, '').split('.')[0] + 'Z';
+                let icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//GlassWorkShift//TW\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n";
+                shifts.forEach(shift => {
+                    const startDate = formatICSDate(new Date(shift.start).toISOString());
+                    const endDate = formatICSDate(new Date(shift.end).toISOString());
+                    icsContent += "BEGIN:VEVENT\n";
+                    icsContent += `SUMMARY:${shift.name}\n`; 
+                    icsContent += `DTSTART:${startDate}\n`;
+                    icsContent += `DTEND:${endDate}\n`;
+                    icsContent += `DESCRIPTION:薪資預估: $${shift.totalPay} | 時數: ${shift.duration.toFixed(1)}hr\n`;
+                    icsContent += `STATUS:CONFIRMED\n`;
+                    icsContent += "END:VEVENT\n";
+                });
+                icsContent += "END:VCALENDAR";
+                const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = window.URL.createObjectURL(blob);
+                link.setAttribute('download', '我的班表.ics');
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const deleteMonthRecords = () => {
+                const targetYear = currentDate.getFullYear();
+                const targetMonth = currentDate.getMonth();
+                const toDelete = shifts.filter(s => {
+                    const d = new Date(s.start);
+                    return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
+                });
+
+                if (toDelete.length === 0) {
+                    alert("這個月份沒有紀錄可刪除");
+                    return;
+                }
+
+                if (window.confirm(`確定要刪除 ${targetYear}年${targetMonth + 1}月 的所有 ${toDelete.length} 筆紀錄嗎？此動作無法復原。`)) {
+                    if (isCloudMode && !isOfflineMode) {
+                        toDelete.forEach(s => saveDataToCloud(null, s.id));
+                    } else {
+                        const newShifts = shifts.filter(s => {
+                            const d = new Date(s.start);
+                            return !(d.getFullYear() === targetYear && d.getMonth() === targetMonth);
+                        });
+                        setShifts(newShifts);
+                    }
+                }
+            };
+
+            const goToToday = () => {
+                const today = new Date();
+                setCurrentDate(today);
+                setSelectedDate(today); 
+            };
+
+            const isViewingCurrentMonth = useMemo(() => {
+                const today = new Date();
+                return currentDate.getMonth() === today.getMonth() && 
+                       currentDate.getFullYear() === today.getFullYear();
+            }, [currentDate]);
+
+            // --- 取得當前月份的所有班表 ---
+            const monthlyShifts = useMemo(() => {
+                const year = currentDate.getFullYear();
+                const month = currentDate.getMonth();
+                return shifts.filter(s => {
+                    const d = new Date(s.start);
+                    return d.getFullYear() === year && d.getMonth() === month;
+                }).sort((a, b) => new Date(b.start) - new Date(a.start)); 
+            }, [shifts, currentDate]);
+
+            const totalIncome = useMemo(() => monthlyShifts.reduce((acc, curr) => acc + curr.totalPay, 0), [monthlyShifts]);
+            const totalHours = useMemo(() => monthlyShifts.reduce((acc, curr) => acc + curr.duration, 0), [monthlyShifts]);
+
+            const filteredShifts = useMemo(() => {
+                if (selectedDate) {
+                    const startOfDay = new Date(selectedDate);
+                    startOfDay.setHours(0, 0, 0, 0);
+                    const endOfDay = new Date(selectedDate);
+                    endOfDay.setHours(23, 59, 59, 999);
+                    return shifts.filter(shift => {
+                        const s = new Date(shift.start);
+                        const e = new Date(shift.end);
+                        return s < endOfDay && e > startOfDay;
+                    }).sort((a, b) => new Date(a.start) - new Date(b.start)); 
+                } else {
+                    return monthlyShifts;
+                }
+            }, [shifts, selectedDate, monthlyShifts]);
+
+            const toDateInputString = (dateObj) => {
+                const year = dateObj.getFullYear();
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+            
+            const toTimeString = (dateObj) => {
+                return dateObj.getHours().toString().padStart(2, '0') + ':' + 
+                       dateObj.getMinutes().toString().padStart(2, '0');
+            };
+
+            const normalizeTime = (val) => {
+                if(!val) return "";
+                val = val.trim().replace(/[^\d:]/g, '');
+                if (!val.includes(':')) {
+                    if (val.length === 4) return val.slice(0, 2) + ':' + val.slice(2);
+                    if (val.length === 3) return '0' + val.slice(0, 1) + ':' + val.slice(1);
+                    if (val.length <= 2) return val.padStart(2, '0') + ':00';
+                }
+                const parts = val.split(':');
+                if(parts.length === 2) {
+                     const h = parts[0].padStart(2, '0');
+                     const m = parts[1].padStart(2, '0');
+                     return `${h}:${m}`;
+                }
+                return val;
+            };
+
+            const handleSaveShift = () => {
+                const safeStartStr = normalizeTime(startTimeStr);
+                const safeEndStr = normalizeTime(endTimeStr);
+
+                if (!name || !shiftDate || !safeStartStr || !safeEndStr) {
+                    alert("請填寫完整資訊");
+                    return;
+                }
+                
+                // Base Date Object
+                const baseStartDateTime = new Date(`${shiftDate}T${safeStartStr}:00`);
+                let baseEndDateTime = new Date(`${shiftDate}T${safeEndStr}:00`);
+
+                if (isNaN(baseStartDateTime.getTime()) || isNaN(baseEndDateTime.getTime())) {
+                    alert("時間格式不正確");
+                    return;
+                }
+
+                // Cross-day logic
+                if (baseEndDateTime <= baseStartDateTime) {
+                    baseEndDateTime.setDate(baseEndDateTime.getDate() + 1);
+                }
+
+                // Calculate constants
+                const durationMs = baseEndDateTime - baseStartDateTime;
+                const durationHours = durationMs / (1000 * 60 * 60);
+                const rate = isSpecial ? parseFloat(specialRate) : parseFloat(baseRate);
+                const pay = Math.round(durationHours * rate);
+
+                // Generate Shifts List
+                const shiftsToSave = [];
+                
+                if (isRepeat && repeatEndDate && !editId) {
+                    const repeatUntil = new Date(repeatEndDate);
+                    repeatUntil.setHours(23, 59, 59, 999);
+                    
+                    let currentStart = new Date(baseStartDateTime);
+                    let currentEnd = new Date(baseEndDateTime);
+
+                    while (currentStart <= repeatUntil) {
+                        shiftsToSave.push({
+                            name,
+                            start: currentStart.toISOString(),
+                            end: currentEnd.toISOString(),
+                            duration: durationHours,
+                            rate,
+                            isSpecial,
+                            totalPay: pay,
+                            id: isCloudMode && !isOfflineMode ? null : Date.now() + Math.random().toString() // Local ID
+                        });
+                        // Add 7 days
+                        currentStart.setDate(currentStart.getDate() + 7);
+                        currentEnd.setDate(currentEnd.getDate() + 7);
+                    }
+                } else {
+                    // Single Shift
+                    shiftsToSave.push({
+                        name,
+                        start: baseStartDateTime.toISOString(),
+                        end: baseEndDateTime.toISOString(),
+                        duration: durationHours,
+                        rate,
+                        isSpecial,
+                        totalPay: pay,
+                        id: editId ? editId : (isCloudMode && !isOfflineMode ? null : Date.now())
+                    });
+                }
+
+                if (isCloudMode && !isOfflineMode) {
+                    // 同步時薪設定到雲端
+                    const { doc, setDoc } = window.Firebase;
+                    const settingsRef = doc(window.db, 'artifacts', APP_ID, 'users', user.uid, 'settings', 'rates');
+                    setDoc(settingsRef, {
+                        baseRate: String(baseRate),
+                        specialRate: String(specialRate)
+                    }, { merge: true }).catch(e => console.error("Error saving settings:", e));
+
+                    if (editId) {
+                        saveDataToCloud(shiftsToSave[0]);
+                    } else {
+                        batchSaveToCloud(shiftsToSave);
+                    }
+                } else {
+                    // Local Mode Fallback
+                    if (editId) {
+                        setShifts(shifts.map(s => s.id === editId ? shiftsToSave[0] : s));
+                    } else {
+                        setShifts([...shiftsToSave, ...shifts]);
+                    }
+                }
+                resetForm();
+            };
+
+            const handleEdit = (shift) => {
+                setEditId(shift.id);
+                setName(shift.name);
+                const s = new Date(shift.start);
+                const e = new Date(shift.end);
+                setShiftDate(toDateInputString(s));
+                setStartTimeStr(toTimeString(s));
+                setEndTimeStr(toTimeString(e));
+                setIsSpecial(shift.isSpecial);
+                setIsRepeat(false);
+                setRepeatEndDate('');
+                setShowInput(true);
+            };
+
+            const handleDelete = (id) => {
+                if (window.confirm('確定要刪除這筆班表嗎？')) {
+                    if (isCloudMode && !isOfflineMode) {
+                        saveDataToCloud(null, id);
+                    } else {
+                        setShifts(shifts.filter(s => s.id !== id));
+                    }
+                }
+            };
+
+            const resetForm = () => {
+                setName('');
+                setShiftDate('');
+                setStartTimeStr('');
+                setEndTimeStr('');
+                setIsSpecial(false);
+                setEditId(null);
+                setIsRepeat(false);
+                setRepeatEndDate('');
+                setShowInput(false);
+            };
+
+            const openAddModal = () => {
+                resetForm();
+                let targetDate = selectedDate ? new Date(selectedDate) : new Date();
+                setShiftDate(toDateInputString(targetDate));
+                setStartTimeStr('09:00');
+                setEndTimeStr('17:00');
+                setShowInput(true);
+            };
+
+            const changeMonth = (offset) => {
+                setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1));
+            };
+
+            const { days, firstDay, year, month } = useMemo(() => {
+                const year = currentDate.getFullYear();
+                const month = currentDate.getMonth();
+                const days = new Date(year, month + 1, 0).getDate();
+                const firstDay = new Date(year, month, 1).getDay();
+                return { days, firstDay, year, month };
+            }, [currentDate]);
+
+            const getShiftStatusForDay = (day) => {
+                const checkStart = new Date(year, month, day, 0, 0, 0);
+                const checkEnd = new Date(year, month, day, 23, 59, 59);
+                const dayShifts = shifts.filter(s => {
+                    const start = new Date(s.start);
+                    const end = new Date(s.end);
+                    return start < checkEnd && end > checkStart;
+                });
+                if (dayShifts.length === 0) return null;
+                return dayShifts.some(s => s.isSpecial) ? 'special' : 'normal';
+            };
+
+            const handleDateClick = (day) => {
+                const clickedDate = new Date(year, month, day);
+                if (selectedDate && clickedDate.getTime() === selectedDate.getTime()) {
+                    setSelectedDate(null);
+                } else {
+                    setSelectedDate(clickedDate);
+                }
+            };
+
+            const calculateBarPosition = (shift, currentDayDate) => {
+                const dayStart = new Date(currentDayDate);
+                dayStart.setHours(0, 0, 0, 0);
+                const dayEnd = new Date(currentDayDate);
+                dayEnd.setHours(24, 0, 0, 0);
+                const shiftStart = new Date(shift.start);
+                const shiftEnd = new Date(shift.end);
+                const effectiveStart = shiftStart < dayStart ? dayStart : shiftStart;
+                const effectiveEnd = shiftEnd > dayEnd ? dayEnd : shiftEnd;
+                const startMinutes = effectiveStart.getHours() * 60 + effectiveStart.getMinutes();
+                const durationMinutes = (effectiveEnd - effectiveStart) / (1000 * 60);
+                const left = (startMinutes / 1440) * 100;
+                const width = (durationMinutes / 1440) * 100;
+                return { left: `${left}%`, width: `${width}%` };
+            };
+
+            const formatMoney = (val) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(val);
+            const formatTime = (iso) => {
+                const d = new Date(iso);
+                return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+            };
+            const formatDateFull = (iso) => {
+                const d = new Date(iso);
+                return `${d.getMonth() + 1}/${d.getDate()}`;
+            };
+
+            // Main Render
+            if (!authInitialized) {
+                return <div className="min-h-screen flex items-center justify-center text-slate-500">載入中...</div>;
+            }
+
+            return (
+                <div className="min-h-screen w-full relative overflow-hidden font-sans text-slate-800 selection:bg-pink-300 selection:text-white">
+                    <div className="fixed inset-0 z-0 pointer-events-none hardware-accelerated">
+                        <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-purple-400 rounded-full mix-blend-multiply filter blur-[90px] opacity-60 animate-blob"></div>
+                        <div className="absolute top-[20%] right-[-10%] w-[50%] h-[50%] bg-blue-400 rounded-full mix-blend-multiply filter blur-[90px] opacity-60 animate-blob animation-delay-2000"></div>
+                        <div className="absolute bottom-[-10%] left-[20%] w-[60%] h-[60%] bg-pink-300 rounded-full mix-blend-multiply filter blur-[90px] opacity-60 animate-blob animation-delay-4000"></div>
+                        <div className="absolute inset-0 bg-white/30 backdrop-blur-[2px]"></div>
+                    </div>
+
+                    {(!user && !isOfflineMode) ? (
+                        <LoginScreen onSkipLogin={() => setIsOfflineMode(true)} />
+                    ) : (
+                        <div className="relative z-10 container mx-auto px-4 py-6 max-w-md md:max-w-6xl min-h-screen flex flex-col gap-6 animate-fade-in">
+                            {/* Header */}
+                            <div className="flex justify-between items-center px-1">
+                                <div className="text-xs font-bold text-slate-500 tracking-widest uppercase flex items-center gap-2">
+                                    {(user && !isOfflineMode) ? 
+                                        <span className="flex items-center gap-1 text-[10px] bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full" title={user.email}><Icons.Cloud size={10} /> {user.email?.split('@')[0]}</span> :
+                                        <span className="flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full"><Icons.WifiOff size={10} /> 本機</span>
+                                    }
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <button onClick={exportToCalendar} className="flex items-center gap-1 text-xs font-bold text-blue-600 bg-blue-100/80 px-2 py-1 rounded-full hover:bg-blue-200 transition-colors">
+                                        <Icons.Share2 size={14} /> 匯出
+                                    </button>
+                                    
+                                    {(user && !isOfflineMode) ? (
+                                        <button onClick={handleLogout} className="flex items-center gap-1 text-xs font-bold text-slate-500 bg-white/50 px-2 py-1 rounded-full hover:bg-white transition-colors">
+                                            <Icons.LogOut size={14} /> 登出
+                                        </button>
+                                    ) : (
+                                        <button onClick={handleGoToLogin} className="flex items-center gap-1 text-xs font-bold text-slate-500 bg-white/50 px-2 py-1 rounded-full hover:bg-white transition-colors">
+                                            <Icons.LogIn size={14} /> 登入同步
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Grid Layout */}
+                            <div className="flex flex-col md:flex-row gap-6 items-start">
+                                
+                                {/* Left Column */}
+                                <div className="w-full md:w-5/12 lg:w-4/12 flex flex-col gap-4 md:sticky md:top-6">
+                                    <div className="flex justify-between items-center bg-white/40 border border-white/50 backdrop-blur-xl rounded-2xl p-4 shadow-lg relative overflow-hidden shrink-0">
+                                        <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-white/40 to-transparent rounded-bl-full pointer-events-none"></div>
+                                        <div>
+                                            <div className="text-xs font-bold text-slate-500 tracking-wider mb-1 flex items-center gap-1">
+                                                <Icons.Calendar size={12} /> 本月預估
+                                            </div>
+                                            <div className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600">
+                                                {formatMoney(totalIncome)}
+                                            </div>
+                                        </div>
+                                        <div className="text-right z-10">
+                                            <div className="text-xs font-bold text-slate-500 tracking-wider mb-1">累積工時</div>
+                                            <div className="text-xl font-bold text-slate-700">{totalHours.toFixed(1)} <span className="text-xs text-slate-500">hr</span></div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white/30 border border-white/40 backdrop-blur-xl rounded-3xl p-4 shadow-xl relative overflow-hidden group transition-all shrink-0">
+                                        <div className="flex justify-between items-center mb-4 px-2 relative">
+                                            <button onClick={() => changeMonth(-1)} className="p-1.5 rounded-full hover:bg-white/50 transition-colors text-slate-600"><Icons.ChevronLeft size={20}/></button>
+                                            <div className="flex items-center gap-2">
+                                                <h2 className="text-lg font-bold text-slate-700">{year}年 {month + 1}月</h2>
+                                                <button onClick={deleteMonthRecords} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-full transition-colors" title="刪除本月所有紀錄">
+                                                    <Icons.Trash2 size={16} />
+                                                </button>
+                                                {!isViewingCurrentMonth && (
+                                                    <button onClick={goToToday} className="text-xs bg-blue-100/80 hover:bg-blue-200 text-blue-600 px-2 py-1 rounded-lg font-bold animate-fade-in transition-colors">回今天</button>
+                                                )}
+                                            </div>
+                                            <button onClick={() => changeMonth(1)} className="p-1.5 rounded-full hover:bg-white/50 transition-colors text-slate-600"><Icons.ChevronRight size={20}/></button>
+                                        </div>
+
+                                        <div className="grid grid-cols-7 text-center mb-2">
+                                            {['日', '一', '二', '三', '四', '五', '六'].map(d => (
+                                                <div key={d} className="text-[10px] font-bold text-slate-400 uppercase">{d}</div>
+                                            ))}
+                                        </div>
+
+                                        <div className="grid grid-cols-7 gap-y-2 text-center">
+                                            {Array.from({ length: firstDay }).map((_, i) => <div key={`empty-${i}`} />)}
+                                            {Array.from({ length: days }).map((_, i) => {
+                                                const day = i + 1;
+                                                const status = getShiftStatusForDay(day);
+                                                const isSelected = selectedDate && selectedDate.getDate() === day && selectedDate.getMonth() === month;
+                                                const isToday = new Date().getDate() === day && new Date().getMonth() === month && new Date().getFullYear() === year;
+
+                                                return (
+                                                    <div key={day} className="flex flex-col items-center justify-center cursor-pointer" onClick={() => handleDateClick(day)}>
+                                                        <div className={`
+                                                            w-8 h-8 flex items-center justify-center rounded-full text-sm font-medium transition-all duration-300 relative
+                                                            ${isSelected ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/40 scale-110' : 'hover:bg-white/40 text-slate-700'}
+                                                            ${isToday && !isSelected ? 'border border-blue-400 bg-blue-50/50' : ''}
+                                                        `}>
+                                                            {day}
+                                                            {status && (
+                                                                <span className={`absolute -bottom-1 w-1.5 h-1.5 rounded-full ${status === 'special' ? 'bg-pink-400 shadow-[0_0_6px_rgba(244,114,182,0.8)]' : 'bg-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.8)]'}`}></span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Right Column */}
+                                <div className="w-full md:w-7/12 lg:w-8/12 flex flex-col gap-4">
+                                    {selectedDate && (
+                                        <div className="animate-slide-up shrink-0">
+                                            <div className="bg-white/50 border border-white/60 backdrop-blur-md rounded-2xl p-4 shadow-lg">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                                        {selectedDate.getMonth()+1}/{selectedDate.getDate()} 時間分配
+                                                    </h3>
+                                                    {filteredShifts.length > 0 && (
+                                                        <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                                                            共 {filteredShifts.reduce((acc,s) => acc + s.duration, 0).toFixed(1)} 小時
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="relative h-12 w-full mt-1 select-none">
+                                                    <div className="absolute inset-0 flex justify-between text-[9px] text-slate-400 font-medium pt-8">
+                                                        <span>00:00</span>
+                                                        <span>06:00</span>
+                                                        <span>12:00</span>
+                                                        <span>18:00</span>
+                                                        <span>24:00</span>
+                                                    </div>
+                                                    <div className="absolute top-2 left-0 right-0 h-4 bg-slate-200/50 rounded-full overflow-hidden shadow-inner"></div>
+                                                    {filteredShifts.length === 0 ? (
+                                                        <div className="absolute top-2 w-full text-center text-xs text-slate-400 mt-0.5">無排班</div>
+                                                    ) : (
+                                                        filteredShifts.map(shift => {
+                                                            const style = calculateBarPosition(shift, selectedDate);
+                                                            const colorClass = getColorByName(shift.name);
+                                                            return (
+                                                                <div 
+                                                                    key={shift.id}
+                                                                    className={`absolute top-2 h-4 rounded-full shadow-sm border border-white/30 transition-all hover:scale-y-110 hover:brightness-110 cursor-help bg-gradient-to-r ${colorClass}`}
+                                                                    style={style}
+                                                                    title={`${shift.name}: ${formatTime(shift.start)} - ${formatTime(shift.end)}`}
+                                                                >
+                                                                    {parseFloat(style.width) > 15 && (
+                                                                        <span className="absolute inset-0 flex items-center justify-center text-[8px] text-white font-bold drop-shadow-md whitespace-nowrap overflow-hidden">
+                                                                            {formatTime(shift.start)}-{formatTime(shift.end)}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="flex justify-between items-center px-1 pt-1 shrink-0">
+                                        <div className="flex items-center gap-2">
+                                            <h2 className="text-lg font-bold text-slate-700/80 drop-shadow-sm">詳細列表</h2>
+                                            {selectedDate && (
+                                                <button onClick={() => setSelectedDate(null)} className="text-xs bg-slate-200/50 hover:bg-slate-300/50 px-2 py-1 rounded-lg text-slate-500 flex items-center transition-colors">
+                                                    顯示全部 <Icons.X size={10} className="ml-1"/>
+                                                </button>
+                                            )}
+                                        </div>
+                                        <button onClick={openAddModal} className="flex items-center gap-1 bg-blue-500/90 hover:bg-blue-600 text-white px-3 py-1.5 rounded-xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 backdrop-blur-md text-sm font-bold">
+                                            <Icons.Plus size={16} /> 記一筆
+                                        </button>
+                                    </div>
+
+                                    <div className="pb-24 space-y-3">
+                                        {filteredShifts.length === 0 ? (
+                                            <div className="flex flex-col items-center justify-center h-20 opacity-50">
+                                                <p className="text-sm text-slate-600 font-medium">{selectedDate ? '點擊上方按鈕新增班次' : '本月沒有班表紀錄'}</p>
+                                            </div>
+                                        ) : (
+                                            filteredShifts.map((shift) => {
+                                                const colorClass = getColorByName(shift.name);
+                                                return (
+                                                    <div key={shift.id} className="group relative bg-white/40 hover:bg-white/60 border border-white/50 backdrop-blur-md rounded-2xl p-4 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5">
+                                                        <div className="flex justify-between items-center">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className={`w-1 h-10 rounded-full shadow-sm bg-gradient-to-b ${colorClass}`}></div>
+                                                                <div>
+                                                                    <h4 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                                                                        {shift.name}
+                                                                        {shift.isSpecial && <Icons.Sparkles size={14} className="text-pink-500 shrink-0" fill="currentColor" stroke="none" />}
+                                                                    </h4>
+                                                                    <div className="text-xs text-slate-500 font-medium tracking-wide flex items-center gap-1">
+                                                                        <span className="bg-white/40 px-1.5 rounded border border-white/20">{formatDateFull(shift.start)}</span>
+                                                                        {formatTime(shift.start)} - {formatTime(shift.end)}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <div className="text-base font-bold text-slate-700">{formatMoney(shift.totalPay)}</div>
+                                                                <div className="text-[10px] text-slate-500 bg-slate-100/30 px-1.5 py-0.5 rounded-md inline-block">{shift.duration.toFixed(1)}h × ${shift.rate}</div>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div className="absolute top-1/2 -translate-y-1/2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 group-hover:-translate-x-2 transition-all duration-300">
+                                                            <button onClick={(e) => { e.stopPropagation(); handleEdit(shift); }} className="bg-blue-400 hover:bg-blue-500 text-white p-2 rounded-full shadow-md hover:scale-110 transition-transform" title="編輯">
+                                                                <Icons.Edit3 size={14} />
+                                                            </button>
+                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete(shift.id); }} className="bg-red-400 hover:bg-red-500 text-white p-2 rounded-full shadow-md hover:scale-110 transition-transform" title="刪除">
+                                                                <Icons.Trash2 size={14} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Input Modal */}
+                    {showInput && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm transition-all" onClick={resetForm}>
+                            <div className="bg-white/80 backdrop-blur-2xl border border-white/60 w-full max-w-sm rounded-3xl p-5 shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-xl font-bold text-slate-700 flex items-center gap-2">
+                                        {editId ? '編輯班次' : '新增班次'}
+                                        {selectedDate && !editId && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{selectedDate.getMonth()+1}/{selectedDate.getDate()}</span>}
+                                    </h3>
+                                    <button onClick={resetForm} className="bg-slate-200/50 p-1 rounded-full hover:bg-slate-300/50 transition-colors"><Icons.X size={20} className="text-slate-500"/></button>
+                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">名稱</label>
+                                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="如：早班" className="w-full bg-white/50 border border-white/40 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-300/50 transition-all"/>
+                                    </div>
+                                    
+                                    {/* Date */}
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">日期</label>
+                                        <input 
+                                            type="date" 
+                                            value={shiftDate} 
+                                            onChange={(e) => setShiftDate(e.target.value)} 
+                                            className="w-full max-w-full bg-white/50 border border-white/40 rounded-xl px-3 py-3 outline-none focus:ring-2 focus:ring-blue-300/50 transition-all font-medium appearance-none min-w-0"
+                                        />
+                                    </div>
+
+                                    {/* Smart Time */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <SmartTimeInput 
+                                            label="開始時間" 
+                                            value={startTimeStr} 
+                                            onChange={setStartTimeStr} 
+                                            inputRef={startTimeRef}
+                                            onEnter={() => endTimeRef.current.focus()}
+                                        />
+                                        <SmartTimeInput 
+                                            label="結束時間" 
+                                            value={endTimeStr} 
+                                            onChange={setEndTimeStr} 
+                                            inputRef={endTimeRef}
+                                            onEnter={handleSaveShift}
+                                        />
+                                    </div>
+
+                                    {/* Repeat Settings (Only for New Shifts) */}
+                                    {!editId && (
+                                        <div className="bg-white/30 border border-white/40 rounded-xl p-3 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg"><Icons.Repeat size={16} /></div>
+                                                <label className="text-xs font-bold text-slate-600">每週重複</label>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <label className="relative inline-flex items-center cursor-pointer">
+                                                    <input type="checkbox" checked={isRepeat} onChange={(e) => setIsRepeat(e.target.checked)} className="sr-only peer" />
+                                                    <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Repeat Until Date */}
+                                    {isRepeat && !editId && (
+                                        <div className="animate-fade-in">
+                                            <label className="block text-xs font-bold text-purple-600 uppercase mb-1 ml-1">重複截止日期</label>
+                                            <input 
+                                                type="date" 
+                                                value={repeatEndDate} 
+                                                onChange={(e) => setRepeatEndDate(e.target.value)} 
+                                                className="w-full bg-purple-50 border border-purple-200 text-purple-700 rounded-xl px-3 py-3 outline-none focus:ring-2 focus:ring-purple-300 transition-all font-medium appearance-none"
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Rates */}
+                                    <div className="bg-white/40 rounded-2xl p-4 border border-white/30 flex items-center justify-between">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 block">時薪設定</label>
+                                            <div className="text-lg font-bold text-slate-700">
+                                                ${isSpecial ? specialRate : baseRate} 
+                                                <span className="text-xs text-slate-400 font-normal ml-1">/hr</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4"> {/* Increased gap */}
+                                            <span className={`text-xs font-bold shrink-0 ${!isSpecial ? 'text-blue-500' : 'text-slate-400'}`}>一般</span> {/* Added shrink-0 */}
+                                            <label className="relative inline-flex items-center cursor-pointer shrink-0"> {/* Added shrink-0 */}
+                                                <input type="checkbox" checked={isSpecial} onChange={(e) => setIsSpecial(e.target.checked)} className="sr-only peer" />
+                                                {/* Changed w-12 to w-14 (56px) to fix handle overflow */}
+                                                <div className="w-[52px] h-7 bg-blue-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-pink-400"></div>
+                                            </label>
+                                            <span className={`text-xs font-bold shrink-0 ${isSpecial ? 'text-pink-500' : 'text-slate-400'}`}>特殊</span> {/* Added shrink-0 */}
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="relative">
+                                            <label className="text-[10px] text-slate-400 absolute top-1 left-2">一般時薪</label>
+                                            <input type="number" value={baseRate} onChange={(e) => setBaseRate(e.target.value)} className="w-full bg-white/30 border-b border-slate-300 text-xs pt-4 pb-1 px-2 text-center text-slate-600 focus:border-blue-500 outline-none rounded-t-lg transition-colors focus:bg-white/60"/>
+                                        </div>
+                                        <div className="relative">
+                                            <label className="text-[10px] text-slate-400 absolute top-1 left-2">特殊時薪</label>
+                                            <input type="number" value={specialRate} onChange={(e) => setSpecialRate(e.target.value)} className="w-full bg-white/30 border-b border-slate-300 text-xs pt-4 pb-1 px-2 text-center text-slate-600 focus:border-pink-500 outline-none rounded-t-lg transition-colors focus:bg-white/60"/>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleSaveShift} className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold py-3.5 rounded-2xl shadow-xl shadow-blue-500/25 active:scale-[0.98] transition-all mt-2">
+                                        {editId ? '確認修改' : (isRepeat ? '批次新增' : '確認新增')}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
