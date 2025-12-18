@@ -9,7 +9,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon.png">
     
-    <!-- 錯誤攔截器 -->
     <script>
         window.onerror = function(msg, url, line, col, error) {
             const errorBox = document.getElementById('error-box');
@@ -21,9 +20,7 @@
         };
     </script>
 
-    <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 React 和 Babel -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -198,7 +195,9 @@
             Repeat: (props) => <Icon {...props} path={<><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></>} />,
             LogOut: (props) => <Icon {...props} path={<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></>} />,
             User: (props) => <Icon {...props} path={<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></>} />,
-            LogIn: (props) => <Icon {...props} path={<><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></>} />
+            LogIn: (props) => <Icon {...props} path={<><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></>} />,
+            Download: (props) => <Icon {...props} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></>} />,
+            List: (props) => <Icon {...props} path={<><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></>} />
         };
 
         // --- Components ---
@@ -294,6 +293,9 @@
             const startTimeRef = useRef(null); const endTimeRef = useRef(null);
             const nameInputRef = useRef(null); 
             const [currentDate, setCurrentDate] = useState(new Date()); const [selectedDate, setSelectedDate] = useState(null); const [saveStatus, setSaveStatus] = useState('idle');
+            
+            // 新增：控制匯出彈窗的狀態
+            const [showExportModal, setShowExportModal] = useState(false);
 
             // Dark Mode Detection Logic
             useEffect(() => {
@@ -345,7 +347,6 @@
                                     setIsOfflineMode(false); 
                                 } else { 
                                     setIsCloudMode(false);
-                                    // 修正：若沒有使用者登入，預設為本機模式 (跳過登入畫面)
                                     setIsOfflineMode(true); 
                                 } 
                             });
@@ -353,13 +354,11 @@
                             console.error("Firebase Init", e); 
                             setAuthInitialized(true); 
                             setIsCloudMode(false);
-                            // 修正：若 Firebase 錯誤，預設為本機模式
                             setIsOfflineMode(true); 
                         }
                     } else { 
                         setAuthInitialized(true); 
                         setIsCloudMode(false);
-                        // 修正：若沒有 Firebase 環境，預設為本機模式
                         setIsOfflineMode(true);
                     }
                 };
@@ -402,10 +401,7 @@
             }, [user, isOfflineMode]);
 
             useEffect(() => {
-                // 只有在明確處於「本機模式」時才寫入 LocalStorage
-                // 避免在登入畫面或模式切換時意外覆蓋資料
                 if (!isOfflineMode) return;
-
                 try {
                     setSaveStatus('saving');
                     localStorage.setItem(STORAGE_KEY_SHIFTS, JSON.stringify(shifts));
@@ -413,8 +409,7 @@
                     localStorage.setItem(STORAGE_KEY_SPECIAL, specialRate);
                     setTimeout(() => setSaveStatus('saved'), 500);
                 } catch (e) { console.error(e); }
-            // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [shifts, baseRate, specialRate]); // 移除 isOfflineMode 依賴，防止模式切換瞬間的資料覆寫
+            }, [shifts, baseRate, specialRate]);
 
             const handleLogout = async () => { if (window.confirm('確定要登出嗎？')) { await window.Firebase.signOut(window.Firebase.getAuth()); setShifts([]); } };
             const handleGoToLogin = () => { setIsOfflineMode(false); setShifts([]); };
@@ -456,18 +451,45 @@
                 }
             };
 
-            const exportToCalendar = () => {
-                if (shifts.length === 0) { alert("沒有班表可匯出"); return; }
+            // 修正後的匯出邏輯：接收模式參數 ('all' 或 'month')
+            const handleExportAction = (mode) => {
+                let shiftsToExport = [];
+                
+                if (mode === 'all') {
+                    shiftsToExport = shifts;
+                } else {
+                    // 匯出本月
+                    const targetYear = currentDate.getFullYear();
+                    const targetMonth = currentDate.getMonth();
+                    shiftsToExport = shifts.filter(s => {
+                        const d = new Date(s.start);
+                        return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
+                    });
+                }
+
+                if (shiftsToExport.length === 0) { 
+                    alert(mode === 'month' ? "本月沒有班表可匯出" : "沒有班表可匯出");
+                    setShowExportModal(false); 
+                    return; 
+                }
+
                 const formatICSDate = (dateStr) => dateStr.replace(/[-:]/g, '').split('.')[0] + 'Z';
                 let icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//GlassWorkShift//TW\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n";
-                shifts.forEach(shift => {
+                shiftsToExport.forEach(shift => {
                     const startDate = formatICSDate(new Date(shift.start).toISOString());
                     const endDate = formatICSDate(new Date(shift.end).toISOString());
                     icsContent += `BEGIN:VEVENT\nSUMMARY:${shift.name}\nDTSTART:${startDate}\nDTEND:${endDate}\nDESCRIPTION:薪資預估: $${shift.totalPay} | 時數: ${shift.duration.toFixed(1)}hr\nSTATUS:CONFIRMED\nEND:VEVENT\n`;
                 });
                 icsContent += "END:VCALENDAR";
+                
+                const fileName = mode === 'month' 
+                    ? `我的班表_${currentDate.getFullYear()}-${currentDate.getMonth()+1}.ics`
+                    : '我的班表_全部.ics';
+
                 const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-                const link = document.createElement('a'); link.href = window.URL.createObjectURL(blob); link.setAttribute('download', '我的班表.ics'); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                const link = document.createElement('a'); link.href = window.URL.createObjectURL(blob); link.setAttribute('download', fileName); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                
+                setShowExportModal(false);
             };
 
             const goToToday = () => { const today = new Date(); setCurrentDate(today); setSelectedDate(today); };
@@ -575,7 +597,6 @@
             };
             const handleDelete = (id) => { if (window.confirm('確定要刪除這筆班表嗎？')) { if (isCloudMode && !isOfflineMode) saveDataToCloud(null, id); else setShifts(shifts.filter(s => s.id !== id)); } };
             
-            // --- Logic Split: resetFormState & closeForm ---
             const resetFormState = () => {
                 setName(''); 
                 setShiftDate(''); 
@@ -632,7 +653,7 @@
                                     <h1 className="text-[34px] font-bold text-slate-900 dark:text-white leading-tight tracking-tight">工作班表</h1>
                                 </div>
                                 <div className="flex items-center gap-3 pb-1">
-                                    <button onClick={exportToCalendar} className="w-10 h-10 rounded-full bg-white/60 dark:bg-zinc-800/60 backdrop-blur-md shadow-sm flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-zinc-700 hover:scale-105 active:scale-95 transition-all"><Icons.Share2 size={20} /></button>
+                                    <button onClick={() => setShowExportModal(true)} className="w-10 h-10 rounded-full bg-white/60 dark:bg-zinc-800/60 backdrop-blur-md shadow-sm flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-zinc-700 hover:scale-105 active:scale-95 transition-all"><Icons.Share2 size={20} /></button>
                                     {(user && !isOfflineMode) ? (
                                         <button onClick={handleLogout} className="w-10 h-10 rounded-full bg-gray-200/60 dark:bg-zinc-700/60 backdrop-blur-md shadow-sm flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600 hover:scale-105 active:scale-95 transition-all"><Icons.LogOut size={20} /></button>
                                     ) : (
@@ -711,7 +732,6 @@
                                                             <div className="flex items-center gap-4">
                                                                 <div className={`w-1.5 h-12 rounded-full shadow-sm bg-gradient-to-b ${colorClass}`}></div>
                                                                 <div>
-                                                                    {/* 修正：使用 span 包裹圖示並強制設定寬高與對齊，避免裁切，加入 py-0.5 和 mt-0.5 增加空間 */}
                                                                     <h4 className="font-bold text-slate-900 dark:text-white text-[19px] flex items-center gap-0.5 mb-1 py-0.5">
                                                                         {shift.name}
                                                                         {shift.isSpecial && (
@@ -742,6 +762,7 @@
                         </div>
                     )}
 
+                    {/* 新增班次彈窗 */}
                     {showInput && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 dark:bg-black/80 backdrop-blur-sm transition-all duration-300">
                             <div className="bg-white/80 dark:bg-zinc-900/90 backdrop-blur-3xl border border-white/60 dark:border-white/10 w-full max-w-sm rounded-[40px] shadow-2xl animate-ios-scale-in relative flex flex-col max-h-[85vh] transition-colors duration-300" onClick={e => e.stopPropagation()}>
@@ -814,6 +835,32 @@
                                 <div className="shrink-0 p-6 pt-2 bg-white/0">
                                     <button onClick={handleSaveShift} type="button" className="w-full h-14 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-gray-200 text-white dark:text-black text-[17px] font-bold rounded-full shadow-xl shadow-slate-900/20 active:scale-95 transition-all">{editId ? '儲存變更' : (isRepeat ? '批次新增' : '新增班次')}</button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* 匯出選項彈窗 (新增) */}
+                    {showExportModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 dark:bg-black/80 backdrop-blur-sm transition-all duration-300" onClick={() => setShowExportModal(false)}>
+                            <div className="bg-white/80 dark:bg-zinc-900/90 backdrop-blur-3xl border border-white/60 dark:border-white/10 w-full max-w-xs rounded-[32px] p-6 shadow-2xl animate-ios-scale-in" onClick={e => e.stopPropagation()}>
+                                <div className="text-center mb-6">
+                                    <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-3">
+                                        <Icons.Share2 size={24} />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">匯出班表</h3>
+                                    <p className="text-sm text-gray-500 dark:text-zinc-400 mt-1">選擇您想要匯出的範圍</p>
+                                </div>
+                                <div className="space-y-3">
+                                    <button onClick={() => handleExportAction('month')} className="w-full h-12 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl font-bold text-[15px] shadow-lg shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-2">
+                                        <Icons.Calendar size={18} />
+                                        匯出本月 ({year}年{month+1}月)
+                                    </button>
+                                    <button onClick={() => handleExportAction('all')} className="w-full h-12 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-slate-900 dark:text-white border border-gray-200 dark:border-zinc-700 rounded-2xl font-bold text-[15px] active:scale-95 transition-all flex items-center justify-center gap-2">
+                                        <Icons.List size={18} />
+                                        匯出所有資料
+                                    </button>
+                                </div>
+                                <button onClick={() => setShowExportModal(false)} className="mt-5 text-gray-400 dark:text-zinc-500 font-semibold text-sm w-full py-2 hover:text-gray-600 dark:hover:text-zinc-300 transition-colors">取消</button>
                             </div>
                         </div>
                     )}
