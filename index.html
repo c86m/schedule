@@ -478,7 +478,8 @@
                 shiftsToExport.forEach(shift => {
                     const startDate = formatICSDate(new Date(shift.start).toISOString());
                     const endDate = formatICSDate(new Date(shift.end).toISOString());
-                    icsContent += `BEGIN:VEVENT\nSUMMARY:${shift.name}\nDTSTART:${startDate}\nDTEND:${endDate}\nDESCRIPTION:薪資預估: $${shift.totalPay} | 時數: ${shift.duration.toFixed(1)}hr\nSTATUS:CONFIRMED\nEND:VEVENT\n`;
+                    // 已移除 DESCRIPTION 欄位
+                    icsContent += `BEGIN:VEVENT\nSUMMARY:${shift.name}\nDTSTART:${startDate}\nDTEND:${endDate}\nSTATUS:CONFIRMED\nEND:VEVENT\n`;
                 });
                 icsContent += "END:VCALENDAR";
                 
